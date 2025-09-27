@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <stdint.h>
 #include <sys/time.h>
+#include <string.h>
 
 #define MAX_ELEMS 128
 #define MAX_UDP_PAYLOAD 1500
@@ -21,11 +22,22 @@ typedef struct{
     int32_t* arr2;
 }client_arrays_t;
 
+static void hexdump(const uint8_t* buf, size_t len){
+    for(size_t i=0; i<len; i++){
+        if(i%16 == 0) printf("%04zu: ", i);
+        printf("%02x ", buf[i]);
+        if(i%16 == 115 || i == len-1) printf("\n");
+    }
+}
+
 size_t pack_client_arrays(const client_arrays_t* m, uint8_t* buf, size_t buflen){
     if(!m || !buf){
         perror("NULL value for either data structure or buffer");
         return 0;
     }
+
+    printf("m->n1 = %u, m->n2 = %u\n", m->n1, m->n2);
+
     size_t s_len = sizeof(uint16_t);
     size_t l_len = sizeof(int32_t);
 
@@ -37,7 +49,7 @@ size_t pack_client_arrays(const client_arrays_t* m, uint8_t* buf, size_t buflen)
     uint8_t* p = buf;
 
     uint16_t net_n1 = htons(m->n1);
-    uint16_t net_n2 = htonl(m->n2);
+    uint16_t net_n2 = htons(m->n2);
 
     memcpy(p, &net_n1, s_len);
     p += s_len;
@@ -65,6 +77,7 @@ int receive_reply(int sock){
     ssize_t n = recvfrom(sock, buffer, sizeof(buffer), 0, (struct sockaddr*)&src, &src_len);
 
     if(n < 0){
+        if(errno == EINTR) return -1;
         perror("recvfrom failed");
         close(sock);
         exit(EXIT_FAILURE);
@@ -76,13 +89,13 @@ int receive_reply(int sock){
         exit(EXIT_FAILURE);
     }
 
-    const uint8_t* p = buffer;
+    uint8_t* p = buffer;
     uint32_t v1, v2;
 
     size_t len = sizeof(uint32_t);
-    memcpy(p, &v1, len);
+    memcpy(&v1, p, len);
     p += len;
-    memcpy(p, &v2, len);
+    memcpy(&v2, p, len);
     p += len;
 
     int32_t sum1 = ntohl(v1);
@@ -90,7 +103,7 @@ int receive_reply(int sock){
 
     printf("Received response from server\n");
     printf("Sum of arr1 = %d\n", sum1);
-    printf("Sum of arr2 = %d", sum2);
+    printf("Sum of arr2 = %d\n", sum2);
 
     return 0;
 }
@@ -108,6 +121,8 @@ int main(){
 
     uint8_t buffer[MAX_UDP_PAYLOAD];
     size_t packed = pack_client_arrays(&msg, buffer, sizeof(buffer));
+
+    hexdump(buffer, packed);
     
     if(packed == 0){
         exit(EXIT_FAILURE);
@@ -133,7 +148,7 @@ int main(){
     tv.tv_sec = TIMEOUT_SEC;
     tv.tv_usec = 0;
 
-    if(setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv) < 0)){
+    if(setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0){
         perror("Couldn't set timeout using setsockopt");
         close(sock);
         exit(EXIT_FAILURE);
@@ -156,7 +171,7 @@ int main(){
     
     }
 
-    if(attempt < MAX_RETRIES){
+    if(attempt > MAX_RETRIES){
         printf("Server did not respond after %d attempts.\n", MAX_RETRIES);
     }
 
